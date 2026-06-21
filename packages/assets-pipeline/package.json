@@ -1,0 +1,14 @@
+{
+  "name": "@600b/assets-pipeline",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": { "600b-assets": "src/cli.ts" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}

@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Builds
+dist/
+build/
+*.tsbuildinfo
+
+# Generated data — never commit (per global standards)
+*.db
+*.sqlite
+*.sqlite3
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python (services/world-agent)
+__pycache__/
+*.pyc
+.ruff_cache/
+.pytest_cache/
+.venv/
+
+# Tooling caches
+.turbo/
+coverage/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json

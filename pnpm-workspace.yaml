@@ -1,0 +1,5 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+# services/world-agent is a Python service (uv), intentionally NOT a pnpm workspace member.

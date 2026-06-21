@@ -1,0 +1,23 @@
+{
+  "name": "600-billion",
+  "version": "0.0.0",
+  "private": true,
+  "description": "600 Billion — The Palace of Culture. Web-first stylized 3D social MMO built on Bitcoin timelocks.",
+  "license": "UNLICENSED",
+  "packageManager": "pnpm@9.12.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev:web": "pnpm --filter @600b/web dev",
+    "dev:server": "pnpm --filter @600b/server dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "biome check .",
+    "format": "biome format --write ."
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "typescript": "^5.6.3"
+  }
+}

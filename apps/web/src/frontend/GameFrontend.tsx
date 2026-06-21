@@ -1,0 +1,1160 @@
+import type { FeatureCollection } from "geojson";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, ReactNode } from "react";
+import { GeoJSON, MapContainer, ZoomControl, useMap, useMapEvents } from "react-leaflet";
+import { createCharacterStore } from "../character/store";
+import { PalaceScene } from "../scene/PalaceScene";
+import { CharacterBuilder } from "../ui/CharacterBuilder";
+import { IntroScreen } from "./IntroScreen";
+import { LevelBuildHandoff } from "./LevelBuildHandoff";
+import { StartScreen } from "./StartScreen";
+import {
+  circleFriends,
+  feeds,
+  navItems,
+  plebListings,
+  styleDrops,
+  timelockTiers,
+  timelocks,
+  worldAssets,
+} from "./data";
+import { Icon } from "./icons";
+import type {
+  Character,
+  EngineTarget,
+  FeedConfig,
+  FeedPost,
+  Friend,
+  MarketItem,
+  NavItem,
+  ScreenId,
+  Timelock,
+} from "./types";
+import "./frontend.css";
+
+type ScreenProps = {
+  onStartEngine: (target: EngineTarget) => void;
+  onBuild: () => void;
+};
+
+type Region = {
+  col: number;
+  row: number;
+  bornAt: number;
+};
+
+type GeoNode = {
+  lat: number;
+  lng: number;
+  name: string;
+};
+
+const HQ_LATLNG: [number, number] = [32.7583, -16.9419];
+
+const fallbackNav: NavItem = {
+  id: "title",
+  name: "Title",
+  label: "TITLE",
+  tag: "enter",
+  icon: "play",
+};
+
+// The Natural Earth GeoJSON (~838 KB) is fetched once per session and cached here, so re-opening the
+// Map is instant. Preloaded on app start (see GameFrontend) so the first open doesn't wait either.
+let countriesPromise: Promise<FeatureCollection> | null = null;
+function loadCountries(): Promise<FeatureCollection> {
+  if (!countriesPromise) {
+    countriesPromise = fetch("/ne_110m_admin_0_countries.geojson").then((response) =>
+      response.json(),
+    );
+  }
+  return countriesPromise;
+}
+
+function MatrixField() {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const context = canvas.getContext("2d");
+    if (!context) return;
+
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const fontSize = 13;
+    const signal = [
+      ["6", "0", "0"],
+      ["0", "0", "0"],
+      ["0", "0", "0"],
+      ["0", "0", "0"],
+    ] as const;
+    const columnWidth = Math.round(fontSize * 1.35);
+    const rowHeight = Math.round(fontSize * 1.35);
+    const sweepPerRow = 0.22;
+    const hold = 1.1;
+    const fade = 0.8;
+    const sweepDuration = signal.length * sweepPerRow;
+    const total = sweepDuration + hold + fade;
+    const regions: Region[] = [];
+
+    let width = 0;
+    let height = 0;
+    let columns = 0;
+    let rows = 0;
+    let nextSpawnAt = 0;
+    let frameId = 0;
+
+    const resize = () => {
+      const rect = canvas.getBoundingClientRect();
+      width = Math.max(1, rect.width);
+      height = Math.max(1, rect.height);
+      canvas.width = width * dpr;
+      canvas.height = height * dpr;
+      context.setTransform(dpr, 0, 0, dpr, 0, 0);
+      columns = Math.ceil(width / columnWidth);
+      rows = Math.ceil(height / rowHeight);
+    };
+
+    const spawn = (now: number) => {
+      regions.push({
+        col: Math.floor(Math.random() * (Math.max(0, columns - 3) + 1)),
+        row: Math.floor(Math.random() * (Math.max(0, rows - signal.length) + 1)),
+        bornAt: now,
+      });
+    };
+
+    const draw = (time: number) => {
+      const now = time / 1000;
+      context.clearRect(0, 0, width, height);
+      context.font = `700 ${fontSize}px "JetBrains Mono", monospace`;
+      context.textBaseline = "top";
+      context.textAlign = "left";
+      context.fillStyle = "rgba(247,147,26,0.085)";
+
+      for (let row = 0; row < rows; row += 1) {
+        for (let col = 0; col < columns; col += 1) {
+          context.fillText("0", col * columnWidth + 2, row * rowHeight);
+        }
+      }
+
+      if (now > nextSpawnAt) {
+        spawn(now);
+        nextSpawnAt = now + 0.7 + Math.random() * 1.1;
+      }
+
+      for (let regionIndex = regions.length - 1; regionIndex >= 0; regionIndex -= 1) {
+        const region = regions[regionIndex];
+        if (!region) continue;
+
+        const age = now - region.bornAt;
+        if (age >= total) {
+          regions.splice(regionIndex, 1);
+          continue;
+        }
+
+        for (let row = 0; row < signal.length; row += 1) {
+          const rowSignal = signal[row];
+          if (!rowSignal) continue;
+
+          const rowLightAt = (signal.length - 1 - row) * sweepPerRow;
+          let alpha = 0;
+          if (age >= rowLightAt && age < sweepDuration + hold) {
+            alpha = Math.min(1, (age - rowLightAt) / sweepPerRow);
+          } else if (age >= sweepDuration + hold) {
+            alpha = Math.max(0, 1 - (age - (sweepDuration + hold)) / fade);
+          }
+          if (alpha <= 0) continue;
+
+          context.fillStyle = `rgba(247,147,26,${alpha})`;
+          for (let col = 0; col < rowSignal.length; col += 1) {
+            const digit = rowSignal[col];
+            if (!digit) continue;
+            context.fillText(
+              digit,
+              (region.col + col) * columnWidth + 2,
+              (region.row + row) * rowHeight,
+            );
+          }
+        }
+      }
+
+      frameId = requestAnimationFrame(draw);
+    };
+
+    resize();
+    const resizeObserver = new ResizeObserver(resize);
+    resizeObserver.observe(canvas);
+    frameId = requestAnimationFrame(draw);
+
+    return () => {
+      resizeObserver.disconnect();
+      cancelAnimationFrame(frameId);
+    };
+  }, []);
+
+  return <canvas className="matrix-field" ref={canvasRef} />;
+}
+
+function NavBadge({
+  current,
+  open,
+  onToggle,
+  onSelect,
+}: {
+  current: NavItem;
+  open: boolean;
+  onToggle: () => void;
+  onSelect: (screen: ScreenId) => void;
+}) {
+  return (
+    <div className="nav-cluster">
+      <button className="nav-pill" onClick={onToggle} type="button">
+        <Icon name="sprout" size={22} />
+        <strong>600B</strong>
+        <span>{current.label}</span>
+        <Icon name="chevron" size={15} />
+      </button>
+      {open ? (
+        <div className="nav-menu">
+          {navItems.map((item) => (
+            <button
+              className={item.id === current.id ? "nav-row nav-row--active" : "nav-row"}
+              key={item.id}
+              onClick={() => onSelect(item.id)}
+              type="button"
+            >
+              <Icon name={item.icon} size={16} />
+              <span>{item.name}</span>
+              <small>{item.tag}</small>
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function TopChrome({
+  current,
+  navOpen,
+  onToggleNav,
+  onSelectScreen,
+  showCoins,
+  character,
+}: {
+  current: NavItem;
+  navOpen: boolean;
+  onToggleNav: () => void;
+  onSelectScreen: (screen: ScreenId) => void;
+  showCoins: boolean;
+  character: Character;
+}) {
+  return (
+    <header className="top-chrome">
+      <NavBadge current={current} onSelect={onSelectScreen} onToggle={onToggleNav} open={navOpen} />
+      <div className="block-pill">
+        <span className="live-dot" />
+        <Icon name="block" size={15} />
+        <span>BLOCK 905,432</span>
+        <small>the world clock</small>
+      </div>
+      <div className="status-cluster">
+        {showCoins ? (
+          <span className="coins-pill">
+            <Icon name="coins" size={15} />
+            12,400
+          </span>
+        ) : null}
+        <span className="days-pill">
+          <Icon name="lock" size={17} />
+          <strong>2,847</strong>
+          <small>DAYS LOCKED</small>
+        </span>
+        <span
+          className="avatar-pill"
+          style={{ "--aura": character.avatar.aura } as CSSProperties}
+          title={character.handle}
+        >
+          <Icon name="paw" size={14} />
+        </span>
+      </div>
+    </header>
+  );
+}
+
+function PostCard({ post }: { post: FeedPost }) {
+  return (
+    <article className={post.pinned ? "post-card post-card--pinned" : "post-card"}>
+      <div className="post-author">
+        <span className="post-avatar">{post.author.slice(0, 1)}</span>
+        <div>
+          <strong>
+            {post.author}
+            {post.founder ? <Icon className="founder-crown" name="crown" size={12} /> : null}
+          </strong>
+          <small>{post.meta}</small>
+        </div>
+      </div>
+      <p>{post.body}</p>
+      <div className="post-actions">
+        <span>
+          <Icon name="reply" size={14} />
+          {post.actions.replies}
+        </span>
+        <span>
+          <Icon name="repost" size={14} />
+          {post.actions.reposts}
+        </span>
+        <span className="zap-count">
+          <Icon name="zap" size={14} />
+          {post.actions.zaps.toLocaleString("en-US")}
+        </span>
+      </div>
+    </article>
+  );
+}
+
+function FeedHead({ feed }: { feed: FeedConfig }) {
+  return (
+    <div className="feed-head">
+      <div className="feed-title">
+        <Icon name={feed.icon} size={20} />
+        <div>
+          <strong>{feed.title}</strong>
+          <small>{feed.subtitle}</small>
+        </div>
+      </div>
+      <span className={`feed-status feed-status--${feed.tone}`}>
+        <span />
+        {feed.status}
+      </span>
+    </div>
+  );
+}
+
+function FeedCompose({ feed }: { feed: FeedConfig }) {
+  return (
+    <div className="feed-compose">
+      <button className="compose-input" type="button">
+        {feed.placeholder}
+      </button>
+      <button className="coral-button coral-button--compact" type="button">
+        <Icon name={feed.icon} size={15} />
+        {feed.action}
+      </button>
+    </div>
+  );
+}
+
+function FeedRail({ feed }: { feed: FeedConfig }) {
+  return (
+    <aside className="feed-rail">
+      <FeedHead feed={feed} />
+      <div className="feed-body">
+        {feed.posts.map((post) => (
+          <PostCard key={post.id} post={post} />
+        ))}
+        {feed.events ? (
+          <section className="events-panel">
+            <div className="events-head">
+              <Icon name="events" size={16} />
+              <strong>Events</strong>
+              <small>head of culture only</small>
+            </div>
+            {feed.events.map((event) => (
+              <article className="event-line" key={event.title}>
+                <strong>{event.title}</strong>
+                <small>{event.tag}</small>
+                <span>{event.description}</span>
+              </article>
+            ))}
+          </section>
+        ) : null}
+      </div>
+      <FeedCompose feed={feed} />
+    </aside>
+  );
+}
+
+/** Home's social rail: a Nostr browser scoped to your private circle — presence + friend threads. */
+function CircleRail({ feed, friends }: { feed: FeedConfig; friends: Friend[] }) {
+  const onlineCount = friends.filter((friend) => friend.online).length;
+
+  return (
+    <aside className="feed-rail">
+      <FeedHead feed={feed} />
+      <section className="circle-presence">
+        <div className="presence-head">
+          <strong>Friends</strong>
+          <small>{onlineCount} online</small>
+        </div>
+        <div className="presence-row">
+          {friends.map((friend) => (
+            <button
+              className={friend.online ? "presence-chip" : "presence-chip presence-chip--off"}
+              key={friend.id}
+              type="button"
+            >
+              <span className="presence-avatar">
+                {friend.handle.slice(0, 1).toUpperCase()}
+                <i className={friend.online ? "presence-dot presence-dot--on" : "presence-dot"} />
+              </span>
+              <span className="presence-text">
+                <strong>
+                  {friend.handle}
+                  {friend.founder ? (
+                    <Icon className="founder-crown" name="crown" size={10} />
+                  ) : null}
+                </strong>
+                <small>{friend.status}</small>
+              </span>
+            </button>
+          ))}
+        </div>
+      </section>
+      <div className="feed-body feed-body--circle">
+        {feed.posts.map((post) => (
+          <PostCard key={post.id} post={post} />
+        ))}
+      </div>
+      <FeedCompose feed={feed} />
+    </aside>
+  );
+}
+
+function ScreenFrame({
+  screen,
+  navOpen,
+  onToggleNav,
+  onSelectScreen,
+  character,
+  children,
+}: {
+  screen: ScreenId;
+  navOpen: boolean;
+  onToggleNav: () => void;
+  onSelectScreen: (screen: ScreenId) => void;
+  character: Character;
+  children: ReactNode;
+}) {
+  const current = navItems.find((item) => item.id === screen) ?? fallbackNav;
+
+  return (
+    <main className={`game-screen screen--${screen}`}>
+      <TopChrome
+        character={character}
+        current={current}
+        navOpen={navOpen}
+        onSelectScreen={onSelectScreen}
+        onToggleNav={onToggleNav}
+        showCoins={screen === "style"}
+      />
+      {children}
+      {screen === "home" ? (
+        <CircleRail feed={feeds.home} friends={circleFriends} />
+      ) : (
+        <FeedRail feed={feeds[screen]} />
+      )}
+    </main>
+  );
+}
+
+function TitleScreen({ onStartEngine }: ScreenProps) {
+  const [selectedTier, setSelectedTier] = useState<(typeof timelockTiers)[number]>("21Y");
+  const [destinationOpen, setDestinationOpen] = useState(false);
+
+  return (
+    <section className="title-layout">
+      <div className="command-card">
+        <div className="brand-lockup">
+          <div className="sacred-number">
+            <span>600</span>
+            <span>000</span>
+            <span>000</span>
+            <span>000</span>
+          </div>
+          <div>
+            <h1>600 Billion</h1>
+            <p>The Palace of Culture</p>
+            <small>money buys style. time builds legend.</small>
+          </div>
+        </div>
+        <div className="field-block">
+          <label htmlFor="destination-button">Destination</label>
+          <button
+            className="destination-button"
+            id="destination-button"
+            onClick={() => setDestinationOpen((value) => !value)}
+            type="button"
+          >
+            <Icon name="crown" size={18} />
+            <span>
+              Palace of Culture HQ
+              <small>Madeira - default</small>
+            </span>
+            <Icon name="chevron" size={16} />
+          </button>
+          {destinationOpen ? (
+            <div className="destination-menu">
+              <button onClick={() => onStartEngine("hq")} type="button">
+                <Icon name="palace" size={17} />
+                <span>
+                  Palace of Culture HQ
+                  <small>engine handoff point</small>
+                </span>
+              </button>
+              <button onClick={() => setDestinationOpen(false)} type="button">
+                <Icon name="map" size={17} />
+                <span>
+                  National palaces
+                  <small>coming after HQ</small>
+                </span>
+              </button>
+            </div>
+          ) : null}
+        </div>
+        <button
+          className="coral-button coral-button--hero"
+          onClick={() => onStartEngine("hq")}
+          type="button"
+        >
+          <Icon name="play" size={18} />
+          Enter the Palace
+          <small>come home</small>
+        </button>
+        <section className="timelock-card">
+          <div>
+            <strong>How much time will you commit?</strong>
+            <small>starts at 21 days</small>
+          </div>
+          <div className="tier-row">
+            {timelockTiers.map((tier) => (
+              <button
+                className={selectedTier === tier ? "tier-chip tier-chip--active" : "tier-chip"}
+                key={tier}
+                onClick={() => setSelectedTier(tier)}
+                type="button"
+              >
+                {tier === "21Y" ? <Icon name="crown" size={13} /> : null}
+                {tier}
+              </button>
+            ))}
+          </div>
+        </section>
+      </div>
+    </section>
+  );
+}
+
+/** Builds a sparse node graph: each land node links to its ~3 nearest neighbours within 11°. */
+function buildEdges(nodes: GeoNode[]): Array<[number, number]> {
+  const seen = new Set<string>();
+  const edges: Array<[number, number]> = [];
+  for (let i = 0; i < nodes.length; i += 1) {
+    const here = nodes[i];
+    if (!here) continue;
+    const near: Array<{ index: number; distance: number }> = [];
+    for (let j = 0; j < nodes.length; j += 1) {
+      if (i === j) continue;
+      const other = nodes[j];
+      if (!other) continue;
+      const dLat = here.lat - other.lat;
+      const dLng = here.lng - other.lng;
+      const distance = dLat * dLat + dLng * dLng;
+      if (distance <= 11 * 11) near.push({ index: j, distance });
+    }
+    near.sort((a, b) => a.distance - b.distance);
+    for (const candidate of near.slice(0, 3)) {
+      const key = i < candidate.index ? `${i}-${candidate.index}` : `${candidate.index}-${i}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      edges.push([i, candidate.index]);
+    }
+  }
+  return edges;
+}
+
+/** Glowing land-node network drawn on a canvas that re-projects through the map every frame. */
+function NodeNetwork({ nodes }: { nodes: GeoNode[] }) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (!nodes.length) return;
+
+    const container = map.getContainer();
+    const canvas = document.createElement("canvas");
+    canvas.className = "node-canvas";
+    container.appendChild(canvas);
+    const context = canvas.getContext("2d");
+    if (!context) {
+      canvas.remove();
+      return;
+    }
+
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const edges = buildEdges(nodes);
+    type Pulse = { edge: number; t: number; speed: number };
+    let pulses: Pulse[] = [];
+    let nextPulseAt = 0;
+    let frameId = 0;
+
+    const resize = () => {
+      const size = map.getSize();
+      canvas.width = size.x * dpr;
+      canvas.height = size.y * dpr;
+      canvas.style.width = `${size.x}px`;
+      canvas.style.height = `${size.y}px`;
+      context.setTransform(dpr, 0, 0, dpr, 0, 0);
+    };
+    resize();
+    map.on("resize", resize);
+
+    const draw = (time: number) => {
+      const seconds = time / 1000;
+      const size = map.getSize();
+      context.clearRect(0, 0, size.x, size.y);
+
+      const points = nodes.map((node) => map.latLngToContainerPoint([node.lat, node.lng]));
+
+      context.lineWidth = 1;
+      context.strokeStyle = "rgba(247,147,26,0.13)";
+      for (const [i, j] of edges) {
+        const a = points[i];
+        const b = points[j];
+        if (!a || !b) continue;
+        context.beginPath();
+        context.moveTo(a.x, a.y);
+        context.lineTo(b.x, b.y);
+        context.stroke();
+      }
+
+      if (seconds > nextPulseAt && edges.length) {
+        pulses.push({
+          edge: Math.floor(Math.random() * edges.length),
+          t: 0,
+          speed: 0.5 + Math.random() * 0.4,
+        });
+        nextPulseAt = seconds + 0.5 + Math.random();
+      }
+
+      const flares = new Set<number>();
+      pulses = pulses.filter((pulse) => {
+        pulse.t += 0.016 * pulse.speed;
+        if (pulse.t >= 1) return false;
+        const edge = edges[pulse.edge];
+        if (!edge) return false;
+        const a = points[edge[0]];
+        const b = points[edge[1]];
+        if (!a || !b) return false;
+        const x = a.x + (b.x - a.x) * pulse.t;
+        const y = a.y + (b.y - a.y) * pulse.t;
+        context.fillStyle = "rgba(247,147,26,0.92)";
+        context.beginPath();
+        context.arc(x, y, 2.2, 0, Math.PI * 2);
+        context.fill();
+        if (pulse.t > 0.82) {
+          flares.add(edge[0]);
+          flares.add(edge[1]);
+        }
+        return true;
+      });
+
+      for (let index = 0; index < points.length; index += 1) {
+        const point = points[index];
+        if (!point) continue;
+        if (point.x < -24 || point.y < -24 || point.x > size.x + 24 || point.y > size.y + 24) {
+          continue;
+        }
+        const breathe = 0.55 + 0.45 * Math.abs(Math.sin(seconds * 0.9 + index * 0.4));
+        const flared = flares.has(index);
+        context.shadowColor = "rgba(247,147,26,0.9)";
+        context.shadowBlur = flared ? 12 : 6;
+        context.fillStyle = `rgba(247,147,26,${flared ? 1 : breathe})`;
+        context.beginPath();
+        context.arc(point.x, point.y, flared ? 3.4 : 1.8, 0, Math.PI * 2);
+        context.fill();
+        context.shadowBlur = 0;
+      }
+
+      frameId = requestAnimationFrame(draw);
+    };
+    frameId = requestAnimationFrame(draw);
+
+    return () => {
+      cancelAnimationFrame(frameId);
+      map.off("resize", resize);
+      canvas.remove();
+    };
+  }, [map, nodes]);
+
+  return null;
+}
+
+/** The single charted location: a gold doubloon marker on Pico Ruivo, Madeira. */
+function HqMarker({ onStartEngine }: { onStartEngine: (target: EngineTarget) => void }) {
+  const map = useMap();
+
+  useEffect(() => {
+    const icon = L.divIcon({
+      className: "hq-leaflet",
+      iconSize: [0, 0],
+      html: `<span class="hq-doubloon">HQ</span><span class="hq-leaflet-label"><strong>Palace of Culture HQ</strong><small>Pico Ruivo, Madeira</small></span>`,
+    });
+    const marker = L.marker(HQ_LATLNG, { icon }).addTo(map);
+    const enter = () => onStartEngine("hq");
+    marker.on("click", enter);
+
+    return () => {
+      marker.off("click", enter);
+      marker.remove();
+    };
+  }, [map, onStartEngine]);
+
+  return null;
+}
+
+/** Placed assets as a dot cluster around HQ — the ever-growing town (personal + community). */
+function AssetMarkers() {
+  const map = useMap();
+
+  useEffect(() => {
+    const markers = worldAssets.map((asset) => {
+      const icon = L.divIcon({
+        className: "asset-leaflet",
+        iconSize: [0, 0],
+        html: `<span class="asset-dot asset-dot--${asset.category}"></span>`,
+      });
+      const marker = L.marker([HQ_LATLNG[0] + asset.offset[0], HQ_LATLNG[1] + asset.offset[1]], {
+        icon,
+      }).addTo(map);
+      marker.bindTooltip(asset.name, {
+        className: "asset-label",
+        direction: "top",
+        offset: [0, -5],
+      });
+      return marker;
+    });
+
+    return () => {
+      for (const marker of markers) marker.remove();
+    };
+  }, [map]);
+
+  return null;
+}
+
+/** Toggles country labels on only at zoom >= 5 (otherwise they overlap into noise). */
+function LabelZoom() {
+  const map = useMapEvents({
+    zoomend: () => {
+      map.getContainer().classList.toggle("labels-visible", map.getZoom() >= 5);
+    },
+  });
+  useEffect(() => {
+    map.getContainer().classList.toggle("labels-visible", map.getZoom() >= 5);
+  }, [map]);
+  return null;
+}
+
+function MapScreen({ onStartEngine }: ScreenProps) {
+  const [filter, setFilter] = useState("All");
+  const [geo, setGeo] = useState<FeatureCollection | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    loadCountries()
+      .then((data) => {
+        if (active) setGeo(data);
+      })
+      .catch(() => {
+        /* offline / missing geojson — map still renders, just without contours */
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const nodes = useMemo<GeoNode[]>(() => {
+    if (!geo) return [];
+    return geo.features
+      .map((feature) => {
+        const props = (feature.properties ?? {}) as Record<string, unknown>;
+        return {
+          lat: Number(props.LABEL_Y),
+          lng: Number(props.LABEL_X),
+          name: String(props.NAME ?? ""),
+        };
+      })
+      .filter((node) => Number.isFinite(node.lat) && Number.isFinite(node.lng));
+  }, [geo]);
+
+  return (
+    <section className="map-layout">
+      <MatrixField />
+      <MapContainer
+        attributionControl={false}
+        center={[28, -26]}
+        className="leaflet-earth"
+        maxBounds={[
+          [-84, -200],
+          [84, 200],
+        ]}
+        maxBoundsViscosity={0.9}
+        maxZoom={8}
+        minZoom={2}
+        zoom={3}
+        zoomControl={false}
+      >
+        {geo ? (
+          <GeoJSON
+            data={geo}
+            onEachFeature={(feature, layer) => {
+              const name = String(feature.properties?.NAME ?? "");
+              if (name) {
+                layer.bindTooltip(name, {
+                  className: "country-label",
+                  direction: "center",
+                  opacity: 1,
+                  permanent: true,
+                });
+              }
+            }}
+            style={() => ({
+              color: "#f7931a",
+              weight: 1,
+              opacity: 0.85,
+              fillColor: "#f7931a",
+              fillOpacity: 0.045,
+            })}
+          />
+        ) : null}
+        <NodeNetwork nodes={nodes} />
+        <HqMarker onStartEngine={onStartEngine} />
+        <AssetMarkers />
+        <LabelZoom />
+        <ZoomControl position="bottomright" />
+      </MapContainer>
+      <div className="map-toolbar">
+        <div className="map-search">
+          <Icon name="search" size={16} />
+          <span>SEARCH PALACES, COUNTRIES...</span>
+        </div>
+        {["All", "National palaces", "Plazas"].map((label) => (
+          <button
+            className={filter === label ? "filter-chip filter-chip--active" : "filter-chip"}
+            key={label}
+            onClick={() => setFilter(label)}
+            type="button"
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <div className="map-empty">Only the HQ is charted. The rest is unbuilt.</div>
+      <div className="compass">N</div>
+      <button className="signal-fab" type="button">
+        <Icon name="community" size={18} />
+        The Signal
+      </button>
+    </section>
+  );
+}
+
+/** The Home dashboard: a wall of your committed timelocks (days locked is the hero metric). */
+function Legendwall({ locks }: { locks: Timelock[] }) {
+  const totalDays = locks.reduce((sum, lock) => sum + lock.daysLocked, 0);
+
+  return (
+    <section className="legendwall">
+      <header className="legendwall-head">
+        <div>
+          <small>Legendwall</small>
+          <h2>Your timelocks</h2>
+        </div>
+        <div className="legendwall-stat">
+          <Icon name="lock" size={15} />
+          <strong>{totalDays.toLocaleString("en-US")}</strong>
+          <small>days locked / {locks.length} timelocks</small>
+        </div>
+      </header>
+      <div className="legend-grid">
+        {locks.map((lock) => (
+          <article
+            className={lock.status === "sealed" ? "lock-card lock-card--sealed" : "lock-card"}
+            key={lock.id}
+          >
+            <div className={`lock-thumb lock-thumb--${lock.tone}`}>
+              <Icon name={lock.icon} size={30} />
+              <span className="lock-tier">
+                {lock.tier === "21Y" ? <Icon name="crown" size={11} /> : null}
+                {lock.tier}
+              </span>
+            </div>
+            <div className="lock-info">
+              <h3>{lock.name}</h3>
+              <small>{lock.grewInto}</small>
+              <p>{lock.detail}</p>
+              <div className="lock-foot">
+                <span className="lock-days">
+                  <Icon name="lock" size={12} />
+                  {lock.daysLocked.toLocaleString("en-US")}d
+                </span>
+                <span
+                  className={
+                    lock.status === "sealed" ? "lock-status lock-status--sealed" : "lock-status"
+                  }
+                >
+                  <Icon name={lock.status === "sealed" ? "check" : "block"} size={11} />
+                  {lock.status === "sealed" ? "sealed" : lock.unlock}
+                </span>
+              </div>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function HomeScreen({ onStartEngine, onBuild }: ScreenProps) {
+  const [tool, setTool] = useState("Decorate");
+  const tools: Array<{ label: string; icon: MarketItem["icon"] }> = [
+    { label: "Decorate", icon: "brush" },
+    { label: "Garden", icon: "flower" },
+    { label: "Tree", icon: "ring" },
+    { label: "Vehicles", icon: "car" },
+  ];
+
+  return (
+    <section className="home-layout">
+      <div className="screen-heading">
+        <h1>Home</h1>
+        <p>your refuge / the builder's plot / golden hour</p>
+      </div>
+      <Legendwall locks={timelocks} />
+      <div className="build-dock">
+        <button className="coral-button" onClick={onBuild} type="button">
+          <Icon name="hammer" size={18} />
+          Build
+        </button>
+        {tools.map(({ label, icon }) => (
+          <button
+            className={tool === label ? "tool-button tool-button--active" : "tool-button"}
+            key={label}
+            onClick={() => setTool(label)}
+            type="button"
+          >
+            <Icon name={icon} size={19} />
+            {label}
+          </button>
+        ))}
+        <button
+          className="tool-button tool-button--wide"
+          onClick={() => onStartEngine("home")}
+          type="button"
+        >
+          <Icon name="home" size={19} />
+          Enter My Plot
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function MarketCard({ item, mode }: { item: MarketItem; mode: "pleb" | "style" }) {
+  return (
+    <article className={item.locked ? "market-card market-card--locked" : "market-card"}>
+      <div className={`market-thumb market-thumb--${item.tone}`}>
+        {item.badge ? <span className="market-badge">{item.badge}</span> : null}
+        {mode === "style" && !item.locked ? <span className="stock-badge">12 left</span> : null}
+        <Icon name={item.icon} size={42} />
+      </div>
+      <div className="market-info">
+        <h2>{item.title}</h2>
+        <small>{item.meta}</small>
+        <div className="market-buy-row">
+          <span className={item.locked ? "locked-price" : "sats-price"}>
+            <Icon name={item.locked ? "lock" : "zap"} size={13} />
+            {item.price}
+          </span>
+          <button
+            className={item.locked ? "ghost-button" : "coral-button coral-button--compact"}
+            type="button"
+          >
+            {item.locked ? "Earned" : mode === "pleb" ? "Offer" : "Get"}
+          </button>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function PlebMarketScreen() {
+  const [filter, setFilter] = useState("All");
+
+  return (
+    <section className="market-layout">
+      <div className="market-head">
+        <div>
+          <h1>Pleb Market</h1>
+          <p>by plebs, for plebs / priced in sats / trade peer to peer</p>
+        </div>
+      </div>
+      <div className="market-toolbar">
+        <button className="market-search" type="button">
+          <Icon name="search" size={16} />
+          search the stalls...
+        </button>
+        {["All", "Goods", "Land"].map((label) => (
+          <button
+            className={filter === label ? "filter-chip filter-chip--active" : "filter-chip"}
+            key={label}
+            onClick={() => setFilter(label)}
+            type="button"
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <div className="market-grid">
+        {plebListings.map((item) => (
+          <MarketCard item={item} key={item.id} mode="pleb" />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function StyleMarketScreen() {
+  const [filter, setFilter] = useState("Outfits");
+
+  return (
+    <section className="market-layout">
+      <div className="market-head">
+        <div>
+          <h1>Style Market</h1>
+          <p>digital assets / money buys style / wear it now</p>
+        </div>
+        <div className="market-filters">
+          {["Outfits", "Vehicle", "Pet", "Decor"].map((label) => (
+            <button
+              className={filter === label ? "filter-chip filter-chip--coral" : "filter-chip"}
+              key={label}
+              onClick={() => setFilter(label)}
+              type="button"
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="market-grid">
+        {styleDrops.map((item) => (
+          <MarketCard item={item} key={item.id} mode="style" />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function renderScreen(screen: ScreenId, props: ScreenProps) {
+  switch (screen) {
+    case "title":
+      return <TitleScreen {...props} />;
+    case "map":
+      return <MapScreen {...props} />;
+    case "home":
+      return <HomeScreen {...props} />;
+    case "pleb":
+      return <PlebMarketScreen />;
+    case "style":
+      return <StyleMarketScreen />;
+  }
+}
+
+export function GameFrontend() {
+  const [started, setStarted] = useState(false);
+  const [introDone, setIntroDone] = useState(false);
+  const [character, setCharacter] = useState<Character | null>(null);
+  const [screen, setScreen] = useState<ScreenId>("title");
+  const [navOpen, setNavOpen] = useState(false);
+  const [engineTarget, setEngineTarget] = useState<EngineTarget | null>(null);
+  const [buildMode, setBuildMode] = useState(false);
+  const store = useMemo(() => createCharacterStore(), []);
+  const [storeChecked, setStoreChecked] = useState(false);
+
+  // Load the saved character from the device DB (plug-and-play persistence) before the create gate.
+  useEffect(() => {
+    let active = true;
+    store.loadCurrent().then((saved) => {
+      if (!active) return;
+      if (saved) setCharacter(saved);
+      setStoreChecked(true);
+    });
+    return () => {
+      active = false;
+    };
+  }, [store]);
+
+  // Warm the Map's GeoJSON in the background so it's ready before the user ever opens the Map.
+  useEffect(() => {
+    loadCountries().catch(() => {});
+  }, []);
+
+  const selectScreen = (nextScreen: ScreenId) => {
+    setScreen(nextScreen);
+    setNavOpen(false);
+  };
+
+  if (!started) {
+    return <StartScreen onStart={() => setStarted(true)} />;
+  }
+
+  if (!introDone) {
+    return <IntroScreen onComplete={() => setIntroDone(true)} />;
+  }
+
+  if (!character) {
+    if (!storeChecked) return null;
+    return (
+      <CharacterBuilder
+        onComplete={(created) => {
+          void store.save(created);
+          setCharacter(created);
+        }}
+      />
+    );
+  }
+
+  if (engineTarget) {
+    return (
+      <PalaceScene
+        character={character}
+        onExit={() => setEngineTarget(null)}
+        target={engineTarget}
+      />
+    );
+  }
+
+  if (buildMode) {
+    return <LevelBuildHandoff onExit={() => setBuildMode(false)} />;
+  }
+
+  return (
+    <ScreenFrame
+      character={character}
+      navOpen={navOpen}
+      onSelectScreen={selectScreen}
+      onToggleNav={() => setNavOpen((value) => !value)}
+      screen={screen}
+    >
+      {renderScreen(screen, {
+        onStartEngine: setEngineTarget,
+        onBuild: () => setBuildMode(true),
+      })}
+    </ScreenFrame>
+  );
+}
