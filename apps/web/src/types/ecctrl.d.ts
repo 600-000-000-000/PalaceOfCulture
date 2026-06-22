@@ -24,6 +24,10 @@ declare module "ecctrl" {
     turnSpeed?: number;
     sprintMult?: number;
     jumpVel?: number;
+    /** How far past the float distance the ground ray still counts as "grounded" (canJump). */
+    rayHitForgiveness?: number;
+    rayLength?: number;
+    jumpForceToGroundMult?: number;
     /** When true, the controller drives `useGame().curAnimation` from the movement state. */
     animated?: boolean;
   }

@@ -1,17 +1,20 @@
-import { KeyboardControls, OrbitControls } from "@react-three/drei";
-import { Canvas, useThree } from "@react-three/fiber";
+import { KeyboardControls, OrbitControls, useKeyboardControls } from "@react-three/drei";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { CuboidCollider, Physics, type RapierRigidBody, RigidBody } from "@react-three/rapier";
 import Ecctrl from "ecctrl";
 import { Leva } from "leva";
-import { Suspense, useEffect, useRef, useState } from "react";
+import { type RefObject, Suspense, useEffect, useRef, useState } from "react";
 import * as THREE from "three";
+import { timelocks } from "../frontend/data";
+import { lockProgress } from "../frontend/growth";
 import { Icon } from "../frontend/icons";
 import type { Character, EngineTarget } from "../frontend/types";
 import { ChatPanel } from "../ui/ChatPanel";
 import { MediaPlayer } from "../ui/MediaPlayer";
 import { AvatarView } from "./AvatarView";
 import { Palace } from "./Palace";
-import { PlotAssets } from "./PlotAssets";
+import { GrowingTree, PlotAssets } from "./PlotAssets";
+import { INTERACTABLES, type Interactable } from "./interactables";
 
 type PalaceSceneProps = {
   target: EngineTarget;
@@ -51,12 +54,107 @@ function OrbitView() {
   return <OrbitControls enableDamping makeDefault maxPolarAngle={Math.PI / 2.05} />;
 }
 
+/**
+ * In-canvas probe (walk mode): each frame reads the keyboard + the player rigidbody to drive (a) the
+ * jump (our own, since ecctrl's canJump is unreliable on the invisible floor) and (b) interact
+ * proximity — the nearest interactable within range, reported up only when it changes.
+ */
+function WalkSystems({
+  bodyRef,
+  onActive,
+}: {
+  bodyRef: RefObject<RapierRigidBody>;
+  onActive: (item: Interactable | null) => void;
+}) {
+  const [, getKeys] = useKeyboardControls();
+  const lastId = useRef<string | null>(null);
+  const jumpPrev = useRef(false);
+  useFrame(() => {
+    const keys = getKeys() as Record<string, boolean>;
+    const body = bodyRef.current;
+    if (!body) return;
+    const linvel = body.linvel();
+    const pos = body.translation();
+
+    // Our own jump (ecctrl's canJump never goes true on the invisible floor, though the key registers):
+    // on a fresh jump press while roughly grounded (small vertical speed), set an upward velocity
+    // straight on the rigidbody. Edge-detected so holding Space doesn't repeat; |vy| gate blocks air jumps.
+    const jumpNow = Boolean(keys.jump);
+    if (jumpNow && !jumpPrev.current && Math.abs(linvel.y) < 2) {
+      body.setLinvel({ x: linvel.x, y: 7.5, z: linvel.z }, true);
+    }
+    jumpPrev.current = jumpNow;
+
+    let best: Interactable | null = null;
+    let bestDist = Number.POSITIVE_INFINITY;
+    for (const item of INTERACTABLES) {
+      const dist = Math.hypot(pos.x - item.position[0], pos.z - item.position[2]);
+      if (dist <= item.radius && dist < bestDist) {
+        best = item;
+        bestDist = dist;
+      }
+    }
+    const id = best?.id ?? null;
+    if (id !== lastId.current) {
+      lastId.current = id;
+      onActive(best);
+    }
+  });
+  return null;
+}
+
 /** The 3D game view, launched from the frontend UI. */
 export function PalaceScene({ target, onExit, character }: PalaceSceneProps) {
   const [mode, setMode] = useState<ViewMode>("orbit");
   const accent = character.avatar.aura;
   const handle = character.handle;
   const playerBody = useRef<RapierRigidBody>(null);
+
+  const [activeInteract, setActiveInteract] = useState<Interactable | null>(null);
+  const [dialog, setDialog] = useState<string | null>(null);
+  const activeRef = useRef<Interactable | null>(null);
+  activeRef.current = activeInteract;
+
+  // Interact (E key, or the on-screen button): fire the nearest interactable's action.
+  useEffect(() => {
+    if (mode !== "walk") return;
+    const onInteractKey = (event: KeyboardEvent) => {
+      if (event.code !== "KeyE") return;
+      const el = document.activeElement;
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return;
+      if (activeRef.current) setDialog(activeRef.current.message);
+    };
+    window.addEventListener("keydown", onInteractKey);
+    return () => {
+      window.removeEventListener("keydown", onInteractKey);
+      setActiveInteract(null);
+      setDialog(null);
+    };
+  }, [mode]);
+
+  // Make jump reliable in walk mode. In the browser, Space's default is to scroll the page or "click"
+  // the focused HUD button (which toggles you back to Overview and reads as "jump is broken"). So while
+  // walking we claim Space for jumping: blur the focused button on entry, and preventDefault every Space
+  // keydown (except when typing in chat). drei's KeyboardControls still receives the event → ecctrl jumps.
+  useEffect(() => {
+    if (mode !== "walk") return;
+    (document.activeElement as HTMLElement | null)?.blur();
+    const claimSpaceForJump = (event: KeyboardEvent) => {
+      if (event.code !== "Space") return;
+      const el = document.activeElement;
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return; // let chat type
+      event.preventDefault();
+    };
+    window.addEventListener("keydown", claimSpaceForJump);
+    return () => window.removeEventListener("keydown", claimSpaceForJump);
+  }, [mode]);
+
+  // The personal growing tree on the Home plot: a 21-month (Tree) lock drives its 3D growth by age.
+  const homeLock =
+    timelocks.find((lock) => lock.tier === "21M") ??
+    timelocks.find((lock) => lock.status === "growing") ??
+    timelocks[0];
+  const homeProgress = homeLock ? lockProgress(homeLock) : 0.5;
 
   const title = target === "hq" ? "Palace of Culture HQ" : "Home Plot";
   const subtitle =
@@ -103,9 +201,13 @@ export function PalaceScene({ target, onExit, character }: PalaceSceneProps) {
                   capsuleHalfHeight={0.5}
                   capsuleRadius={0.4}
                   floatHeight={0.3}
-                  jumpVel={5}
+                  jumpVel={6}
                   maxVelLimit={4}
                   position={SPAWN}
+                  // Widen ecctrl's ground detection so "canJump" is reliably true on the deck — the
+                  // default forgiveness (0.1) gave a tight 0.8 window vs the 0.7 float, so jump often
+                  // never fired. 0.5 keeps canJump solid while grounded without making mid-air jumps.
+                  rayHitForgiveness={0.5}
                   ref={playerBody}
                   sprintMult={2}
                 >
@@ -116,6 +218,13 @@ export function PalaceScene({ target, onExit, character }: PalaceSceneProps) {
               ) : null}
             </Physics>
             <PlotAssets accent={accent} />
+            {/* Home plot only: your personal Tree, grown in 3D to its current age (Tamagotchi). */}
+            {target === "home" ? (
+              <GrowingTree position={[-7, 0, 40]} progress={homeProgress} />
+            ) : null}
+            {mode === "walk" ? (
+              <WalkSystems bodyRef={playerBody} onActive={setActiveInteract} />
+            ) : null}
           </Suspense>
           {mode === "orbit" ? <OrbitView /> : null}
         </Canvas>
@@ -142,7 +251,25 @@ export function PalaceScene({ target, onExit, character }: PalaceSceneProps) {
       {mode === "walk" ? (
         <div className="fp-hint">
           <strong>Drag to look around</strong>
-          <span>WASD / arrows to move · Shift to run · Space to jump</span>
+          <span>WASD / arrows to move · Shift to run · Space to jump · E to interact</span>
+        </div>
+      ) : null}
+      {mode === "walk" && activeInteract ? (
+        <button
+          className="interact-prompt"
+          onClick={() => setDialog(activeInteract.message)}
+          type="button"
+        >
+          <span className="interact-key">E</span>
+          {activeInteract.label}
+        </button>
+      ) : null}
+      {dialog ? (
+        <div className="interact-dialog">
+          <p>{dialog}</p>
+          <button className="interact-close" onClick={() => setDialog(null)} type="button">
+            Close
+          </button>
         </div>
       ) : null}
       <ChatPanel handle={handle} />
