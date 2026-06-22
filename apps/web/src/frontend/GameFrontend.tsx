@@ -22,6 +22,7 @@ import {
 } from "../net/social";
 import { PalaceScene } from "../scene/PalaceScene";
 import { MemberSelect } from "../ui/MemberSelect";
+import { GrowthSprite } from "./GrowthSprite";
 import { IntroScreen } from "./IntroScreen";
 import { LevelBuildHandoff } from "./LevelBuildHandoff";
 import { StartScreen } from "./StartScreen";
@@ -35,6 +36,7 @@ import {
   worldAssets,
 } from "./data";
 import { loadTabs, saveTabs } from "./feedTabs";
+import { growthStage, kindForTier } from "./growth";
 import { Icon } from "./icons";
 import type {
   Character,
@@ -918,7 +920,8 @@ function Legendwall({ locks, compact }: { locks: Timelock[]; compact?: boolean }
             key={lock.id}
           >
             <div className={`lock-thumb lock-thumb--${lock.tone}`}>
-              <Icon name={lock.icon} size={30} />
+              {/* Dynamic Tamagotchi sprite: grows with the lock's age (tree/ship/special × stage). */}
+              <GrowthSprite kind={kindForTier(lock.tier)} stage={growthStage(lock)} />
               <span className="lock-tier">
                 {lock.tier === "21Y" ? <Icon name="crown" size={11} /> : null}
                 {lock.tier}
