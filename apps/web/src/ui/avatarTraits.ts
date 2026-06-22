@@ -37,17 +37,22 @@ export const SKIN_TONES: readonly string[] = [
 // The signature aura palette (DESIGN-BRIEF): gold, orange, coral, green, teal.
 export const AURAS: readonly string[] = ["#e7b23c", "#f7931a", "#e8704f", "#2bd07a", "#1f6b62"];
 
-export const HAIR: readonly Trait[] = [
-  { id: "short", label: "Short", asset: null },
-  { id: "long", label: "Long", asset: null },
-  { id: "buzz", label: "Buzz", asset: null },
-  { id: "bun", label: "Bun", asset: null },
+// Hair colours — tint the loaded character's "Hair" material(s). Elder age overrides to grey.
+export const HAIR_COLORS: readonly string[] = [
+  "#1a1208",
+  "#3a2a1a",
+  "#6a4a2a",
+  "#a9783c",
+  "#caa15a",
+  "#2b2b2b",
 ];
 
+// Outfits map to cute Quaternius preset characters (per gender) — see scene/AvatarView.tsx.
 export const OUTFITS: readonly Trait[] = [
-  { id: "hoodie", label: "Hoodie", asset: null },
-  { id: "jacket", label: "Jacket", asset: null },
-  { id: "apron", label: "Maker apron", asset: null },
+  { id: "casual", label: "Casual", asset: null },
+  { id: "worker", label: "Worker", asset: null },
+  { id: "suit", label: "Suit", asset: null },
+  { id: "explorer", label: "Explorer", asset: null },
 ];
 
 export const HEADWEAR: readonly Trait[] = [

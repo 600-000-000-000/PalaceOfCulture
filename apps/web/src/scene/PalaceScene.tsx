@@ -1,13 +1,14 @@
 import { KeyboardControls, OrbitControls } from "@react-three/drei";
 import { Canvas, useThree } from "@react-three/fiber";
-import { Physics } from "@react-three/rapier";
+import { CuboidCollider, Physics, type RapierRigidBody, RigidBody } from "@react-three/rapier";
 import Ecctrl from "ecctrl";
 import { Leva } from "leva";
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { Icon } from "../frontend/icons";
 import type { Character, EngineTarget } from "../frontend/types";
 import { ChatPanel } from "../ui/ChatPanel";
+import { MediaPlayer } from "../ui/MediaPlayer";
 import { AvatarView } from "./AvatarView";
 import { Palace } from "./Palace";
 import { PlotAssets } from "./PlotAssets";
@@ -55,6 +56,7 @@ export function PalaceScene({ target, onExit, character }: PalaceSceneProps) {
   const [mode, setMode] = useState<ViewMode>("orbit");
   const accent = character.avatar.aura;
   const handle = character.handle;
+  const playerBody = useRef<RapierRigidBody>(null);
 
   const title = target === "hq" ? "Palace of Culture HQ" : "Home Plot";
   const subtitle =
@@ -87,6 +89,12 @@ export function PalaceScene({ target, onExit, character }: PalaceSceneProps) {
           <Suspense fallback={null}>
             <Physics timeStep="vary">
               <Palace />
+              {/* Invisible flat floor at the deck level (y=0): the palace trimesh has gaps/glass the
+                  ecctrl ground ray misses, leaving the controller stuck in "fall" so it never walks.
+                  A guaranteed ground plane keeps the player grounded across the whole plaza. */}
+              <RigidBody type="fixed" colliders={false}>
+                <CuboidCollider args={[300, 0.5, 300]} position={[0, -0.5, 0]} />
+              </RigidBody>
               {mode === "walk" ? (
                 <Ecctrl
                   camInitDis={-7}
@@ -98,10 +106,11 @@ export function PalaceScene({ target, onExit, character }: PalaceSceneProps) {
                   jumpVel={5}
                   maxVelLimit={4}
                   position={SPAWN}
+                  ref={playerBody}
                   sprintMult={2}
                 >
                   <group position={[0, -0.9, 0]}>
-                    <AvatarView config={character.avatar} />
+                    <AvatarView bodyRef={playerBody} config={character.avatar} />
                   </group>
                 </Ecctrl>
               ) : null}
@@ -137,6 +146,7 @@ export function PalaceScene({ target, onExit, character }: PalaceSceneProps) {
         </div>
       ) : null}
       <ChatPanel handle={handle} />
+      <MediaPlayer />
     </div>
   );
 }

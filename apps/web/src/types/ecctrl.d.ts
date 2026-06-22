@@ -6,8 +6,8 @@
 // declare just that here and point tsconfig `paths` at this file. The bundler still resolves the
 // real package at runtime — this only swaps the types tsc reads.
 declare module "ecctrl" {
-  import type { FC, ReactNode } from "react";
-  import type { RigidBodyProps } from "@react-three/rapier";
+  import type { ForwardRefExoticComponent, ReactNode, RefAttributes } from "react";
+  import type { RapierRigidBody, RigidBodyProps } from "@react-three/rapier";
 
   export interface EcctrlProps extends RigidBodyProps {
     children?: ReactNode;
@@ -24,8 +24,41 @@ declare module "ecctrl" {
     turnSpeed?: number;
     sprintMult?: number;
     jumpVel?: number;
+    /** When true, the controller drives `useGame().curAnimation` from the movement state. */
+    animated?: boolean;
   }
 
-  const Ecctrl: FC<EcctrlProps>;
+  const Ecctrl: ForwardRefExoticComponent<EcctrlProps & RefAttributes<RapierRigidBody>>;
   export default Ecctrl;
+
+  // The built-in animation/game store. Names map canonical locomotion states → clip names; the
+  // controller sets `curAnimation` to the matching value as the player moves.
+  export type AnimationSet = {
+    idle?: string;
+    walk?: string;
+    run?: string;
+    jump?: string;
+    jumpIdle?: string;
+    jumpLand?: string;
+    fall?: string;
+    action1?: string;
+    action2?: string;
+    action3?: string;
+    action4?: string;
+  };
+
+  export interface GameState {
+    curAnimation: string | null;
+    animationSet: AnimationSet;
+    initializeAnimationSet: (animationSet: AnimationSet) => void;
+    reset: () => void;
+  }
+
+  export interface UseGame {
+    <T>(selector: (state: GameState) => T): T;
+    getState(): GameState;
+    setState(partial: Partial<GameState>): void;
+  }
+
+  export const useGame: UseGame;
 }

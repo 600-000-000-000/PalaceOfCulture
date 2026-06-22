@@ -1,33 +1,66 @@
 import type { AvatarConfig } from "@600b/shared";
-import { Suspense } from "react";
+import type { RapierRigidBody } from "@react-three/rapier";
+import { type RefObject, Suspense } from "react";
 import { CharacterModel } from "./CharacterModel";
-import { VrmAvatar } from "./VrmAvatar";
+import { RiggedAvatar } from "./RiggedAvatar";
+import { findImport } from "./avatarImports";
 
-// The configured Builder avatar. Empty today (no VRM asset yet) → procedural placeholder. When the
-// VRoid Builder VRM + a Mixamo idle clip land (see docs/AVATAR-PIPELINE.md), point these at the
-// files (or wire to character.avatarVrmRef) and every avatar becomes a real animated VRM with no
-// other code change. Put assets under apps/web/public/avatar/.
-const BUILDER_VRM_URL = "/avatar/sample.vrm";
-const BUILDER_IDLE_CLIP = "/avatar/clip.fbx";
+// Cute CC0 Quaternius preset characters (Ultimate Modular Men/Women, self-contained glTF, each with
+// an "Idle" clip), picked by **gender × outfit** = the parametric quick-start. Drop more presets into
+// apps/web/public/avatar/humans/ and extend the map.
+//
+// Note: the other traits (hair/skin/aura/age) don't drive these complete presets yet — that needs
+// per-part mesh tinting/swapping (the Quaternius parts are generically named "Cube.*"); tracked for
+// later (ADR 0003). For now Body + Outfit drive the avatar.
+type Gender = AvatarConfig["gender"];
+
+const WOMEN: Record<string, string> = {
+  casual: "/avatar/humans/woman-casual.gltf",
+  worker: "/avatar/humans/woman-worker.gltf",
+  suit: "/avatar/humans/woman-suit.gltf",
+  explorer: "/avatar/humans/woman-explorer.gltf",
+};
+const MEN: Record<string, string> = {
+  casual: "/avatar/humans/man-casual.gltf",
+  worker: "/avatar/humans/man-worker.gltf",
+  suit: "/avatar/humans/man-suit.gltf",
+  explorer: "/avatar/humans/man-explorer.gltf",
+};
+const PRESETS: Record<Gender, Record<string, string>> = {
+  feminine: WOMEN,
+  masculine: MEN,
+  neutral: MEN,
+};
+
+function presetUrl(config: AvatarConfig): string {
+  const set = PRESETS[config.gender];
+  return set[config.outfit] ?? set.casual ?? "";
+}
 
 /**
- * Renders the player avatar: a real animated VRM when one is configured, otherwise the procedural
- * placeholder built from the `AvatarConfig`. The single switch point so the rest of the scene never
- * cares which it is.
+ * The single switch point for the player avatar. An **imported model** (`config.modelUrl`, the
+ * Meshy→rig pipeline output) wins outright; otherwise the cute Quaternius preset for the chosen
+ * gender + outfit, or the procedural `CharacterModel` if none matches. `bodyRef` (the player's rapier
+ * body) lets the avatar pick idle/walk/run from its speed. `locomotion={false}` (the turntable
+ * preview) skips loading the walk/run clip GLBs — only the idle mesh is fetched. The Suspense
+ * fallback is empty (not the blocky placeholder) so switching models doesn't flash an old shape.
  */
 export function AvatarView({
   config,
-  vrmUrl = BUILDER_VRM_URL,
-  animationUrl = BUILDER_IDLE_CLIP,
+  bodyRef,
+  locomotion = true,
 }: {
   config: AvatarConfig;
-  vrmUrl?: string;
-  animationUrl?: string;
+  bodyRef?: RefObject<RapierRigidBody | null>;
+  locomotion?: boolean;
 }) {
-  if (!vrmUrl) return <CharacterModel config={config} />;
+  const url = config.modelUrl || presetUrl(config);
+  if (!url) return <CharacterModel config={config} />;
+  // Imported models carry their locomotion clips in extra GLBs; skip them for a static preview.
+  const clipUrls = locomotion ? findImport(config.modelUrl)?.clipUrls : undefined;
   return (
-    <Suspense fallback={<CharacterModel config={config} />}>
-      <VrmAvatar animationUrl={animationUrl || undefined} url={vrmUrl} />
+    <Suspense fallback={null}>
+      <RiggedAvatar bodyRef={bodyRef} clipUrls={clipUrls} config={config} key={url} url={url} />
     </Suspense>
   );
 }
