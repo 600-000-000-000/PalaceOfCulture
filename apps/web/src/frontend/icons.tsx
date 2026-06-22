@@ -45,6 +45,12 @@ const paths: Record<IconName, JSX.Element> = {
     </>
   ),
   crown: <path d="M3 8l4.2 3.8L12 5l4.8 6.8L21 8v9H3z" />,
+  doc: (
+    <>
+      <path d="M6 3h8l4 4v14H6z" />
+      <path d="M14 3v4h4M9 12h6M9 16h6M9 8h2" />
+    </>
+  ),
   events: (
     <>
       <path d="M5 22V3" />
@@ -110,6 +116,12 @@ const paths: Record<IconName, JSX.Element> = {
     </>
   ),
   play: <polygon points="7,4 20,12 7,20" fill="currentColor" stroke="none" />,
+  pause: (
+    <>
+      <rect x="6.5" y="5" width="3.6" height="14" rx="1" fill="currentColor" stroke="none" />
+      <rect x="13.9" y="5" width="3.6" height="14" rx="1" fill="currentColor" stroke="none" />
+    </>
+  ),
   reply: <path d="M21 11.5a8 8 0 0 1-11.5 7.2L4 20l1.3-4.4A8 8 0 1 1 21 11.5Z" />,
   repost: <path d="M4 9V8a3 3 0 0 1 3-3h9l-2.6-2.6M20 15v1a3 3 0 0 1-3 3H8l2.6 2.6" />,
   ring: (

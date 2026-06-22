@@ -48,6 +48,10 @@ export type MarketItem = {
   icon: IconName;
   tone: "gold" | "coral" | "teal" | "deep";
   locked?: boolean;
+  /** External checkout deeplink (e.g. the listing on plebeian.market). Buy opens it in a new tab. */
+  href?: string;
+  /** Product photo from the Nostr listing (NIP-15 `images` / NIP-99 `image`); falls back to the icon. */
+  image?: string;
 };
 
 export type NavItem = {
@@ -101,6 +105,7 @@ export type IconName =
   | "coins"
   | "community"
   | "crown"
+  | "doc"
   | "events"
   | "flower"
   | "globe"
@@ -111,6 +116,7 @@ export type IconName =
   | "palace"
   | "paw"
   | "play"
+  | "pause"
   | "reply"
   | "repost"
   | "ring"

@@ -162,63 +162,8 @@ export const feeds: Record<ScreenId, FeedConfig> = {
   },
 };
 
-export const plebListings: MarketItem[] = [
-  {
-    id: "lantern",
-    title: "Founder Lantern",
-    meta: "goods / npub1fo...rge",
-    price: "50,000",
-    badge: "WTS",
-    icon: "events",
-    tone: "gold",
-  },
-  {
-    id: "corner-plot",
-    title: "Corner Plot / near stage",
-    meta: "land / npub1pl...aza",
-    price: "1.2M",
-    badge: "WTS",
-    icon: "map",
-    tone: "teal",
-  },
-  {
-    id: "rover",
-    title: "Restored Rover",
-    meta: "vehicle / npub1ro...ver",
-    price: "380,000",
-    badge: "WTS",
-    icon: "car",
-    tone: "coral",
-  },
-  {
-    id: "sapling",
-    title: "Cherry Sapling",
-    meta: "garden / npub1gr...den",
-    price: "8,000",
-    badge: "WTS",
-    icon: "sprout",
-    tone: "gold",
-  },
-  {
-    id: "sign",
-    title: "Hand-forged Sign",
-    meta: "goods / npub1si...gns",
-    price: "22,000",
-    badge: "WTB",
-    icon: "hammer",
-    tone: "deep",
-  },
-  {
-    id: "collar",
-    title: "Woven Collar",
-    meta: "pet cosmetic / npub1pe...t",
-    price: "12,000",
-    badge: "WTS",
-    icon: "paw",
-    tone: "teal",
-  },
-];
-
+// Pleb-market listings now come live from Nostr (plebeian.market, NIP-15/NIP-99) — see net/market.ts,
+// which also holds the on-brand mock fallback (MARKET_MOCK). The Style market stays a static drop list.
 export const styleDrops: MarketItem[] = [
   {
     id: "hoodie",
