@@ -85,10 +85,63 @@ export function createMockVoiceTransport(localHandle: string): VoiceTransport {
   };
 }
 
+// --- Real SFU backends (ADR 0005) ------------------------------------------------------------------
+// Two self-hostable SFUs sit behind this same interface: LiveKit (Apache-2.0, default) and HiveTalk
+// (AGPL-3.0, the Nostr-native test backend — used only as a separate self-hosted SERVICE, never linked
+// into this MIT client). Pick one with VITE_VOICE_BACKEND; each needs its server URL. Both need a
+// running SFU (deferred infra, infra/hosting.md), so until a URL is configured they fall back to the
+// mock so the dock keeps working — the real connect code drops into the marked TODO with no UI change.
+
+export type VoiceBackend = "mock" | "livekit" | "hivetalk";
+
+const VOICE_BACKEND = (import.meta.env.VITE_VOICE_BACKEND as VoiceBackend | undefined) ?? "mock";
+
 /**
- * Factory the UI calls. Returns the plug-and-play mock today; swap to a LiveKit (then MoQ)
- * transport behind this interface — the dock never changes.
+ * LiveKit SFU backend (Apache-2.0). Needs a LiveKit server + a token endpoint (deferred infra). When
+ * `VITE_LIVEKIT_URL` is set, install `livekit-client` and do `room.connect(url, token)` + publish the
+ * mic track at the TODO; until then it falls back to the mock room so the voice dock still works.
+ */
+export function createLiveKitVoiceTransport(localHandle: string): VoiceTransport {
+  const url = import.meta.env.VITE_LIVEKIT_URL as string | undefined;
+  if (!url) {
+    console.info(
+      "[voice] livekit selected but VITE_LIVEKIT_URL is unset — falling back to mock room",
+    );
+    return createMockVoiceTransport(localHandle);
+  }
+  // TODO(infra): real LiveKit join — new Room(); await room.connect(url, token); publish mic track.
+  return createMockVoiceTransport(localHandle);
+}
+
+/**
+ * HiveTalk SFU backend (AGPL-3.0, self-hosted service — ADR 0005). Needs a HiveTalk instance URL. When
+ * `VITE_HIVETALK_URL` is set, join the plaza's room there (first cut = room-join/deeplink) at the TODO;
+ * until then it falls back to the mock room. We connect to it over the network only — never bundle it.
+ */
+export function createHiveTalkVoiceTransport(localHandle: string): VoiceTransport {
+  const url = import.meta.env.VITE_HIVETALK_URL as string | undefined;
+  if (!url) {
+    console.info(
+      "[voice] hivetalk selected but VITE_HIVETALK_URL is unset — falling back to mock room",
+    );
+    return createMockVoiceTransport(localHandle);
+  }
+  // TODO(infra): join the HiveTalk room for the current plaza (room URL / API), npub-authenticated.
+  return createMockVoiceTransport(localHandle);
+}
+
+/**
+ * Factory the UI calls. Selects the backend via VITE_VOICE_BACKEND (mock | livekit | hivetalk, ADR
+ * 0005); the dock never changes which one it gets. Default = the plug-and-play mock. MoQ is the
+ * stage-2 target behind this same interface (ADR 0002).
  */
 export function createVoiceTransport(localHandle: string): VoiceTransport {
-  return createMockVoiceTransport(localHandle);
+  switch (VOICE_BACKEND) {
+    case "livekit":
+      return createLiveKitVoiceTransport(localHandle);
+    case "hivetalk":
+      return createHiveTalkVoiceTransport(localHandle);
+    default:
+      return createMockVoiceTransport(localHandle);
+  }
 }

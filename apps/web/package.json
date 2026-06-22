@@ -10,8 +10,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@600b/identity": "workspace:*",
     "@600b/ownership": "workspace:*",
     "@600b/shared": "workspace:*",
+    "@nostr-dev-kit/ndk": "^3.0.3",
     "@pixiv/three-vrm": "^3.5.4",
     "@react-three/drei": "^9.114.0",
     "@react-three/fiber": "^8.17.10",
@@ -19,6 +21,7 @@
     "ecctrl": "1.0.88",
     "leaflet": "^1.9.4",
     "leva": "0.10.0",
+    "nostr-tools": "^2.23.5",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-leaflet": "^4.2.1",

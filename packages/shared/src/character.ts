@@ -24,6 +24,12 @@ export interface AvatarConfig {
   hair: string; // trait id
   outfit: string; // trait id (hoodie variants etc.)
   headwear: string; // trait id; "none" allowed
+  /**
+   * Optional **imported rigged model** (pipeline output: Meshy → rig → VRM/GLB, ADR 0003). A
+   * same-origin/CDN url to a skinned glTF; when set it overrides the parametric preset entirely
+   * (the avatar IS that mesh). "Art is static, state is data": the url is the data, the mesh the art.
+   */
+  modelUrl?: string;
 }
 
 /**
@@ -34,7 +40,9 @@ export interface AvatarConfig {
 export interface Character {
   id: string;
   handle: string;
-  pubkey?: string; // per-seal npub (added when identity lands)
+  pubkey?: string; // the player's npub (demo key now; their own NIP-07/46 key later)
+  /** How the player's key is held — a throwaway demo key now; NIP-07/NIP-46 in the secure phase. */
+  keySource?: "demo" | "nip07" | "bunker";
   avatar: AvatarConfig;
   avatarVrmRef?: string; // Blossom sha256 / CDN url of the composed VRM (added when the kit lands)
   createdAt: number;
@@ -48,7 +56,7 @@ export const DEFAULT_AVATAR: AvatarConfig = {
   age: "young",
   skinTone: "#c98f63",
   aura: "#e7b23c",
-  hair: "short",
-  outfit: "hoodie",
+  hair: "#3a2a1a",
+  outfit: "casual",
   headwear: "none",
 };
